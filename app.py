@@ -8,11 +8,10 @@ from io import BytesIO
 
 st.set_page_config(
     page_title="Pine State Liquor Retail Builder",
-    page_icon="🍺",
     layout="wide"
 )
 
-st.title("🍺 Pine State Liquor Retail Builder")
+st.title("Pine State Liquor Retail Builder")
 st.markdown(
     """
 Generate **Standard** and **Promo** retail files from:
@@ -29,12 +28,12 @@ st.divider()
 # ==========================================================
 
 vendor_file = st.file_uploader(
-    "📂 Raw Vendor Store Cost File",
+    "Raw Vendor Store Cost File",
     type=["csv", "xlsx"]
 )
 
 master_file = st.file_uploader(
-    "📂 Pine State Liquor Master Price List",
+    "Master Price List",
     type=["xlsx"]
 )
 
