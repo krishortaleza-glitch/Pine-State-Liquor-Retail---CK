@@ -27,6 +27,14 @@ st.divider()
 # File Uploads
 # ==========================================================
 
+retailer = st.selectbox(
+    "Retailer",
+    [
+        "Circle K",
+        "EG America"
+    ]
+)
+
 vendor_file = st.file_uploader(
     "Raw Vendor Store Cost File",
     type=["csv", "xlsx"]
@@ -180,7 +188,10 @@ if vendor_file and master_file:
     vendor["vendorProductUID"] = clean_uid(vendor["vendorProductUID"])
     vendor["retailProductUID"] = clean_uid(vendor["retailProductUID"])
 
-    master["Item ."] = clean_uid(master["Item ."])
+    if retailer == "Circle K":
+    master["LookupKey"] = clean_uid(master["Item ."])
+    else:
+    master["LookupKey"] = clean_uid(master["UPC"])
 
     # -----------------------------
     # Convert prices to numeric
@@ -211,7 +222,7 @@ if vendor_file and master_file:
     # -----------------------------
 
     master = master.drop_duplicates(
-        subset="Item .",
+        subset="LookupKey",
         keep="first"
     )
 
@@ -222,14 +233,14 @@ if vendor_file and master_file:
 
     retail_lookup = dict(
         zip(
-            master["Item ."],
+            master["LookupKey"],
             master["Retail Price"]
         )
     )
-
+    
     promo_lookup = dict(
         zip(
-            master["Item ."],
+            master["LookupKey"],
             master["Sales Price"]
         )
     )
