@@ -189,9 +189,9 @@ if vendor_file and master_file:
     vendor["retailProductUID"] = clean_uid(vendor["retailProductUID"])
 
     if retailer == "Circle K":
-    master["LookupKey"] = clean_uid(master["Item ."])
+        master["LookupKey"] = clean_uid(master["Item ."])
     else:
-    master["LookupKey"] = clean_uid(master["UPC"])
+        master["LookupKey"] = clean_uid(master["UPC"])
 
     # -----------------------------
     # Convert prices to numeric
