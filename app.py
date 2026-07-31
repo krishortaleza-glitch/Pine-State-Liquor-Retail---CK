@@ -7,12 +7,11 @@ from io import BytesIO
 # ==========================================================
 
 st.set_page_config(
-    page_title="Retail Price Builder",
-    page_icon="🍺",
+    page_title="Pinestate Liquor Retail Tool",
     layout="wide"
 )
 
-st.title("🍺 Retail Price Builder")
+st.title("Pinestate Liquor Retail Tool")
 
 st.markdown("""
 Generate Standard and Promo retail files from:
@@ -525,13 +524,13 @@ if vendor_file and master_file:
 
         standard.to_excel(
             writer,
-            sheet_name="Standard Output",
+            sheet_name="Standard Retail",
             index=False
         )
 
         promo.to_excel(
             writer,
-            sheet_name="Promo Output",
+            sheet_name="Promo Retail",
             index=False
         )
 
@@ -551,82 +550,7 @@ if vendor_file and master_file:
     st.success("Retail files generated successfully!")
 
     st.divider()
-
-    # ======================================================
-    # Metrics
-    # ======================================================
-
-    st.subheader("Summary")
-
-    col1, col2, col3, col4, col5 = st.columns(5)
-
-    with col1:
-        st.metric(
-            "Vendor Records",
-            f"{len(vendor):,}"
-        )
-
-    with col2:
-        st.metric(
-            "Standard Matches",
-            f"{len(standard):,}"
-        )
-
-    with col3:
-        st.metric(
-            "Promo Matches",
-            f"{len(promo):,}"
-        )
-
-    with col4:
-        st.metric(
-            "Missing Standard",
-            f"{len(standard_missing):,}"
-        )
-
-    with col5:
-        st.metric(
-            "Missing Promo",
-            f"{len(promo_missing):,}"
-        )
-
-    st.divider()
-
-    # ======================================================
-    # Preview
-    # ======================================================
-
-    preview_tab1, preview_tab2, preview_tab3 = st.tabs(
-        [
-            "Standard Output",
-            "Promo Output",
-            "Missing Retails"
-        ]
-    )
-
-    with preview_tab1:
-        st.dataframe(
-            standard,
-            use_container_width=True,
-            hide_index=True
-        )
-
-    with preview_tab2:
-        st.dataframe(
-            promo,
-            use_container_width=True,
-            hide_index=True
-        )
-
-    with preview_tab3:
-        st.dataframe(
-            missing_retails,
-            use_container_width=True,
-            hide_index=True
-        )
-
-    st.divider()
-
+  
     # ======================================================
     # Download
     # ======================================================
