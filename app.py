@@ -283,15 +283,17 @@ if vendor_file and master_file:
     })
 
     # Safety check
-    # If any promo retail is 0, make it blank
+  # Convert promo retail to numeric
+promo["Retail"] = pd.to_numeric(
+    promo["Retail"],
+    errors="coerce"
+)
 
-    promo["Retail"] = (
-        pd.to_numeric(
-            promo["Retail"],
-            errors="coerce"
-        )
-        .mask(lambda s: s == 0)
-    )
+# Treat 0 as blank
+promo.loc[promo["Retail"] == 0, "Retail"] = pd.NA
+
+# Remove rows with no promo retail
+promo = promo[promo["Retail"].notna()].reset_index(drop=True)
 
     # ======================================================
     # Missing Standard Retails ONLY
@@ -369,7 +371,11 @@ if vendor_file and master_file:
 
     # Promo missing ignores intentional blanks (0 values converted to NA)
     promo_lookup_count = master["Sales Price"].notna().sum()
-    missing_promo = total_records - promo_matches
+    # Products that don't exist in the master price list
+vendor_keys = set(vendor["vendorProductUID"].dropna())
+master_keys = set(master["Item ."].dropna())
+
+missing_promo = len(vendor_keys - master_keys)
 
     col1, col2, col3, col4, col5 = st.columns(5)
 
