@@ -7,24 +7,28 @@ from io import BytesIO
 # ==========================================================
 
 st.set_page_config(
-    page_title="Pine State Liquor Retail Builder",
+    page_title="Retail Price Builder",
+    page_icon="🍺",
     layout="wide"
 )
 
-st.title("Pine State Liquor Retail Builder")
-st.markdown(
-    """
-Generate **Standard** and **Promo** retail files from:
+st.title("🍺 Retail Price Builder")
 
-- Raw Vendor Store Cost File
-- Pine State Liquor Master Price List
-"""
-)
+st.markdown("""
+Generate Standard and Promo retail files from:
+
+- Vendor Store Cost File
+- Master Price List
+
+Supported Retailers:
+- Circle K
+- EG America
+""")
 
 st.divider()
 
 # ==========================================================
-# File Uploads
+# Retailer Selection
 # ==========================================================
 
 retailer = st.selectbox(
@@ -35,8 +39,12 @@ retailer = st.selectbox(
     ]
 )
 
+# ==========================================================
+# File Uploads
+# ==========================================================
+
 vendor_file = st.file_uploader(
-    "Raw Vendor Store Cost File",
+    "Vendor Store Cost File",
     type=["csv", "xlsx"]
 )
 
@@ -55,24 +63,37 @@ def read_vendor(uploaded_file):
     if uploaded_file.name.lower().endswith(".csv"):
         return pd.read_csv(
             uploaded_file,
+            dtype=str,
             low_memory=False
         )
 
-    return pd.read_excel(uploaded_file)
+    return pd.read_excel(
+        uploaded_file,
+        dtype=str
+    )
+
+
+def read_master(uploaded_file):
+    """Read Master Price List."""
+
+    return pd.read_excel(
+        uploaded_file,
+        dtype=str
+    )
 
 
 def clean_uid(series):
     """
-    Normalize Product IDs.
+    Normalize UPC / UID values.
 
     Examples
-
+    --------
     0006270
     06270
     6270
     6270.0
 
-    become
+    becomes
 
     6270
     """
@@ -90,9 +111,6 @@ def clean_uid(series):
 
 
 def validate_columns(df, required_columns, file_name):
-    """
-    Validate required columns.
-    """
 
     missing = [
         col
@@ -104,7 +122,7 @@ def validate_columns(df, required_columns, file_name):
 
         st.error(
             f"""
-**{file_name}** is missing the following required column(s):
+**{file_name}** is missing the following required columns:
 
 - """ + "\n- ".join(missing)
         )
@@ -125,10 +143,16 @@ VENDOR_COLUMNS = [
 ]
 
 MASTER_COLUMNS = [
-    "Item .",
     "Retail Price",
     "Sales Price"
 ]
+
+# Retailer-specific matching column
+
+if retailer == "Circle K":
+    MASTER_COLUMNS.append("Item .")
+else:
+    MASTER_COLUMNS.append("UPC")
 
 # ==========================================================
 # Main
@@ -148,7 +172,7 @@ if vendor_file and master_file:
         text="Reading Master Price List..."
     )
 
-    master = pd.read_excel(master_file)
+    master = read_master(master_file)
 
     progress.progress(
         40,
@@ -172,8 +196,12 @@ if vendor_file and master_file:
         text="Preparing data..."
     )
 
-        # ======================================================
-    # PART 2 - Processing Logic
+    # ======================================================
+    # PART 2 STARTS HERE
+    # ======================================================
+
+    # ======================================================
+    # PART 2 - Data Preparation
     # ======================================================
 
     progress.progress(
@@ -182,19 +210,36 @@ if vendor_file and master_file:
     )
 
     # -----------------------------
-    # Normalize IDs
+    # Normalize Vendor IDs
     # -----------------------------
 
     vendor["vendorProductUID"] = clean_uid(vendor["vendorProductUID"])
     vendor["retailProductUID"] = clean_uid(vendor["retailProductUID"])
 
+    # -----------------------------
+    # Retailer-specific Lookup Key
+    # -----------------------------
+
     if retailer == "Circle K":
-        master["LookupKey"] = clean_uid(master["Item ."])
+
+        master["LookupKey"] = clean_uid(
+            master["Item ."]
+        )
+
     else:
-        master["LookupKey"] = clean_uid(master["UPC"])
+
+        master["LookupKey"] = clean_uid(
+            master["UPC"]
+        )
+
+    # Remove blanks
+
+    master = master[
+        master["LookupKey"].notna()
+    ].copy()
 
     # -----------------------------
-    # Convert prices to numeric
+    # Retail Prices
     # -----------------------------
 
     master["Retail Price"] = pd.to_numeric(
@@ -207,42 +252,20 @@ if vendor_file and master_file:
         errors="coerce"
     )
 
-    # -----------------------------
-    # Promo:
-    # 0 means NO promo
-    # Convert to blank
-    # -----------------------------
+    # Promo 0 = blank
 
-    master["Sales Price"] = master["Sales Price"].mask(
-        master["Sales Price"].fillna(0) == 0
+    master["Sales Price"] = (
+        master["Sales Price"]
+        .mask(master["Sales Price"].fillna(0) == 0)
     )
 
     # -----------------------------
-    # Remove duplicate Item IDs
+    # Remove duplicate lookup keys
     # -----------------------------
 
     master = master.drop_duplicates(
         subset="LookupKey",
         keep="first"
-    )
-
-    progress.progress(
-        70,
-        text="Creating lookup dictionaries..."
-    )
-
-    retail_lookup = dict(
-        zip(
-            master["LookupKey"],
-            master["Retail Price"]
-        )
-    )
-    
-    promo_lookup = dict(
-        zip(
-            master["LookupKey"],
-            master["Sales Price"]
-        )
     )
 
     # -----------------------------
@@ -262,80 +285,239 @@ if vendor_file and master_file:
     )
 
     progress.progress(
-        80,
-        text="Building output tables..."
+        70,
+        text="Preparing matching engine..."
     )
 
     # ======================================================
-    # Standard Output
+    # PART 3 STARTS HERE
+    # Matching Engine
     # ======================================================
+
+    # ======================================================
+    # PART 3 - Matching Engine
+    # ======================================================
+
+    progress.progress(
+        80,
+        text=f"Matching {retailer} products..."
+    )
+
+    # Create output columns
+    vendor["Retail"] = pd.NA
+    vendor["PromoRetail"] = pd.NA
+
+    # --------------------------------------------------
+    # CIRCLE K
+    # Exact dictionary lookup
+    # --------------------------------------------------
+
+    if retailer == "Circle K":
+
+        retail_lookup = dict(
+            zip(
+                master["LookupKey"],
+                master["Retail Price"]
+            )
+        )
+
+        promo_lookup = dict(
+            zip(
+                master["LookupKey"],
+                master["Sales Price"]
+            )
+        )
+
+        vendor["Retail"] = (
+            vendor["vendorProductUID"]
+            .map(retail_lookup)
+        )
+
+        vendor["PromoRetail"] = (
+            vendor["vendorProductUID"]
+            .map(promo_lookup)
+        )
+
+    # --------------------------------------------------
+    # EG AMERICA
+    # Exact -> Contains
+    # --------------------------------------------------
+
+    else:
+
+        total = len(vendor)
+
+        for i, row in enumerate(vendor.itertuples(), start=1):
+
+            vendor_upc = row.vendorProductUID
+
+            if pd.isna(vendor_upc):
+                continue
+
+            vendor_upc = str(vendor_upc)
+
+            # -------------------------
+            # 1. Exact Match
+            # -------------------------
+
+            exact = master[
+                master["LookupKey"] == vendor_upc
+            ]
+
+            if len(exact) == 1:
+
+                vendor.at[row.Index, "Retail"] = exact.iloc[0]["Retail Price"]
+                vendor.at[row.Index, "PromoRetail"] = exact.iloc[0]["Sales Price"]
+
+                continue
+
+            # -------------------------
+            # 2. Contains Match
+            # -------------------------
+
+            contains = master[
+                master["LookupKey"].str.contains(
+                    vendor_upc,
+                    regex=False,
+                    na=False
+                )
+            ]
+
+            # Only accept ONE unique match
+
+            if len(contains) == 1:
+
+                vendor.at[row.Index, "Retail"] = contains.iloc[0]["Retail Price"]
+                vendor.at[row.Index, "PromoRetail"] = contains.iloc[0]["Sales Price"]
+
+            # Multiple matches are ignored intentionally
+
+            if i % 500 == 0:
+
+                progress.progress(
+                    min(95, 80 + int((i / total) * 15)),
+                    text=f"Matching EG America... {i:,}/{total:,}"
+                )
+
+    # ======================================================
+    # PART 4 STARTS HERE
+    # Build Output Files
+    # ======================================================
+    # ======================================================
+    # PART 4 - Build Output Files
+    # ======================================================
+
+    progress.progress(
+        96,
+        text="Building output files..."
+    )
+
+    # --------------------------------------------------
+    # Standard Output
+    # --------------------------------------------------
 
     standard = pd.DataFrame({
+
         "StoreID": vendor["StoreID"],
+
         "RetailUID": vendor["retailProductUID"],
-        "Retail": vendor["vendorProductUID"].map(retail_lookup),
+
+        "Retail": vendor["Retail"],
+
         "Pack Type": vendor["Pack Type"],
+
         "retailProductName": vendor["retailProductName"],
+
         "group": vendor["group"]
+
     })
 
-    # ======================================================
+    # Remove rows without retail
+
+    standard_missing = standard[
+        standard["Retail"].isna()
+    ].copy()
+
+    standard = standard[
+        standard["Retail"].notna()
+    ].copy()
+
+    # --------------------------------------------------
     # Promo Output
-    # ======================================================
+    # --------------------------------------------------
 
     promo = pd.DataFrame({
+
         "StoreID": vendor["StoreID"],
+
         "RetailUID": vendor["retailProductUID"],
-        "Retail": vendor["vendorProductUID"].map(promo_lookup),
+
+        "Retail": vendor["PromoRetail"],
+
         "Pack Type": vendor["Pack Type"],
+
         "retailProductName": vendor["retailProductName"],
+
         "group": vendor["group"]
+
     })
 
-    # Safety check
-  # Convert promo retail to numeric
-    promo["Retail"] = pd.to_numeric(
-        promo["Retail"],
-        errors="coerce"
-    )
+    # Remove blank promo prices
 
-    # Treat 0 as blank
-    promo.loc[promo["Retail"] == 0, "Retail"] = pd.NA
-    
-    # Remove rows with no promo retail
-    promo = promo[promo["Retail"].notna()].reset_index(drop=True)
+    promo_missing = promo[
+        promo["Retail"].isna()
+    ].copy()
 
-    # ======================================================
-    # Missing Standard Retails ONLY
-    # ======================================================
+    promo = promo[
+        promo["Retail"].notna()
+    ].copy()
 
-    missing = vendor.loc[
-        standard["Retail"].isna(),
+    # --------------------------------------------------
+    # Missing Retails
+    # --------------------------------------------------
+
+    missing_retails = vendor.loc[
+        vendor["Retail"].isna(),
         [
             "StoreID",
-            "retailProductUID",
             "vendorProductUID",
+            "retailProductUID",
             "retailProductName",
             "group"
         ]
     ].copy()
 
-    missing.rename(
+    missing_retails.rename(
         columns={
+            "vendorProductUID": "VendorProductUID",
             "retailProductUID": "RetailUID",
-            "vendorProductUID": "VendorProductUID"
+            "retailProductName": "Product Name",
+            "group": "Group"
         },
         inplace=True
     )
 
-    # ======================================================
-    # PART 3 - Export Workbook
-    # ======================================================
+    # Sort for easier review
+
+    missing_retails = missing_retails.sort_values(
+        by=[
+            "StoreID",
+            "Product Name"
+        ]
+    )
 
     progress.progress(
-        90,
-        text="Generating Excel workbook..."
+        99,
+        text="Preparing Excel workbook..."
     )
+
+    # ======================================================
+    # PART 5 STARTS HERE
+    # Export Workbook
+    # ======================================================
+    # ======================================================
+    # PART 5 - Export Workbook
+    # ======================================================
 
     output = BytesIO()
 
@@ -353,7 +535,7 @@ if vendor_file and master_file:
             index=False
         )
 
-        missing.to_excel(
+        missing_retails.to_excel(
             writer,
             sheet_name="Missing Retails",
             index=False
@@ -363,63 +545,95 @@ if vendor_file and master_file:
 
     progress.progress(
         100,
-        text="Done!"
+        text="Complete!"
     )
 
-    st.success("✅ Pine State Liquor output has been generated successfully.")
-
-    # ======================================================
-    # Summary Metrics
-    # ======================================================
-
-    total_records = len(vendor)
-
-    standard_matches = standard["Retail"].notna().sum()
-    promo_matches = promo["Retail"].notna().sum()
-
-    missing_standard = standard["Retail"].isna().sum()
-
-    # Promo missing ignores intentional blanks (0 values converted to NA)
-    promo_lookup_count = master["Sales Price"].notna().sum()
-    # Products that don't exist in the master price list
-    vendor_keys = set(vendor["vendorProductUID"].dropna())
-    master_keys = set(master["Item ."].dropna())
-
-    missing_promo = len(vendor_keys - master_keys)
-
-    col1, col2, col3, col4, col5 = st.columns(5)
-
-    col1.metric(
-        "Vendor Records",
-        f"{total_records:,}"
-    )
-
-    col2.metric(
-        "Standard Matches",
-        f"{standard_matches:,}"
-    )
-
-    col3.metric(
-        "Promo Matches",
-        f"{promo_matches:,}"
-    )
-
-    col4.metric(
-        "Missing Standard",
-        f"{missing_standard:,}"
-    )
-
-    col5.metric(
-        "Missing Promo",
-        f"{missing_promo:,}"
-    )
+    st.success("Retail files generated successfully!")
 
     st.divider()
 
+    # ======================================================
+    # Metrics
+    # ======================================================
+
+    st.subheader("Summary")
+
+    col1, col2, col3, col4, col5 = st.columns(5)
+
+    with col1:
+        st.metric(
+            "Vendor Records",
+            f"{len(vendor):,}"
+        )
+
+    with col2:
+        st.metric(
+            "Standard Matches",
+            f"{len(standard):,}"
+        )
+
+    with col3:
+        st.metric(
+            "Promo Matches",
+            f"{len(promo):,}"
+        )
+
+    with col4:
+        st.metric(
+            "Missing Standard",
+            f"{len(standard_missing):,}"
+        )
+
+    with col5:
+        st.metric(
+            "Missing Promo",
+            f"{len(promo_missing):,}"
+        )
+
+    st.divider()
+
+    # ======================================================
+    # Preview
+    # ======================================================
+
+    preview_tab1, preview_tab2, preview_tab3 = st.tabs(
+        [
+            "Standard Output",
+            "Promo Output",
+            "Missing Retails"
+        ]
+    )
+
+    with preview_tab1:
+        st.dataframe(
+            standard,
+            use_container_width=True,
+            hide_index=True
+        )
+
+    with preview_tab2:
+        st.dataframe(
+            promo,
+            use_container_width=True,
+            hide_index=True
+        )
+
+    with preview_tab3:
+        st.dataframe(
+            missing_retails,
+            use_container_width=True,
+            hide_index=True
+        )
+
+    st.divider()
+
+    # ======================================================
+    # Download
+    # ======================================================
+
     st.download_button(
-        label="📥 Download PineState_Liquor_Output.xlsx",
-        data=output,
-        file_name="PineState_Liquor_Output.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        use_container_width=True
+        label="📥 Download Retail Workbook",
+        data=output.getvalue(),
+        file_name=f"{retailer}_Retail_Output.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
